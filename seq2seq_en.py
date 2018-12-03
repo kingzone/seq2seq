@@ -10,42 +10,69 @@ from keras.models import Model
 from keras import backend as K
 from keras.callbacks import Callback
 from keras.optimizers import Adam
+from nltk.parse.corenlp import CoreNLPParser
+
+stanford = CoreNLPParser()
+str = 'proved to be fake, made-up'
+token = list(stanford.tokenize(str))
+print token
 
 
 min_count = 32
+# min_count = 2
 maxlen = 400
+# maxlen = 4000
+# maxlen = 40
 batch_size = 64
-epochs = 100
+# batch_size = 4
+# epochs = 100
+epochs = 10
 char_size = 128
-db = pymongo.MongoClient().text.news # 我的数据存在mongodb中
+# db = pymongo.MongoClient().text.news # 我的数据存在mongodb中
 
 
 if os.path.exists('seq2seq_config.json'):
-    chars,id2char,char2id = json.load(open('seq2seq_config.json'))
-    id2char = {int(i):j for i,j in id2char.items()}
+    chars, id2char, char2id = json.load(open('seq2seq_config.json'))
+    id2char = {int(i): j for i, j in id2char.items()}
 else:
     chars = {}
-    for a in tqdm(db.find()):
-        for w in a['content']: # 纯文本，不用分词
-            chars[w] = chars.get(w,0) + 1
-        for w in a['title']: # 纯文本，不用分词
-            chars[w] = chars.get(w,0) + 1
-    chars = {i:j for i,j in chars.items() if j >= min_count}
+    # for a in tqdm(db.find()):
+    #     for w in a['content']: # 纯文本，不用分词
+    #         chars[w] = chars.get(w,0) + 1
+    #     for w in a['title']: # 纯文本，不用分词
+    #         chars[w] = chars.get(w,0) + 1
+    with(open('./bytecup.corpus.train.0.txt.head1w')) as f:
+        train_set0 = f.readlines()
+        train_set0 = map(lambda x: x.rstrip(), train_set0)
+        train_set0_json_str = "[" + ','.join(train_set0) + "]"
+        import pandas as pd
+        train_set0_df = pd.read_json(train_set0_json_str)
+        # stanford = CoreNLPParser()
+        # for row in train_set0_df:
+        for index, row in train_set0_df.iterrows():
+            # print row['content'].encode('utf-8')
+            # for w in row['content'].split(" "):
+            for w in list(stanford.tokenize(row['content'])):
+                chars[w] = chars.get(w, 0) + 1
+            # for w in row['title'].split(" "):
+            for w in list(stanford.tokenize(row['title'])):
+                chars[w] = chars.get(w, 0) + 1
+    chars = {i: j for i, j in chars.items() if j >= min_count}
     # 0: mask
     # 1: unk
     # 2: start
     # 3: end
-    id2char = {i+4:j for i,j in enumerate(chars)}
-    char2id = {j:i for i,j in id2char.items()}
-    json.dump([chars,id2char,char2id], open('seq2seq_config.json', 'w'))
+    id2char = {i+4: j for i, j in enumerate(chars)}
+    char2id = {j: i for i, j in id2char.items()}
+    json.dump([chars, id2char, char2id], open('seq2seq_config.json', 'w'))
 
 
 def str2id(s, start_end=False):
     # 文字转整数id
-    if start_end: # 补上<start>和<end>标记
+    if start_end:  # 补上<start>和<end>标记
         ids = [char2id.get(c, 1) for c in s[:maxlen-2]]
         ids = [2] + ids + [3]
-    else: # 普通转化
+    else:  # 普通转化
         ids = [char2id.get(c, 1) for c in s[:maxlen]]
     return ids
 
@@ -63,20 +90,36 @@ def padding(x):
 
 def data_generator():
     # 数据生成器
-    X,Y = [],[]
+    X, Y = [], []
     while True:
-        for a in db.find():
-            X.append(str2id(a['content']))
-            Y.append(str2id(a['title'], start_end=True))
-            if len(X) == batch_size:
-                X = np.array(padding(X))
-                Y = np.array(padding(Y))
-                yield [X,Y], None
-                X,Y = [],[]
+        # for a in db.find():
+        #     X.append(str2id(a['content']))
+        #     Y.append(str2id(a['title'], start_end=True))
+        # print '1'
+        with(open('./bytecup.corpus.train.0.txt.head1w')) as f:
+            train_set0 = f.readlines()
+            train_set0 = map(lambda x: x.rstrip(), train_set0)
+            train_set0_json_str = "[" + ','.join(train_set0) + "]"
+            import pandas as pd
+            train_set0_df = pd.read_json(train_set0_json_str)
+            # stanford = CoreNLPParser()
+            # for row in train_set0_df:
+            for index, row in train_set0_df.iterrows():
+                # print row
+                # X.append(str2id(row['content'].split(" ")))
+                # stanford = CoreNLPParser()
+                X.append(str2id(list(stanford.tokenize(row['content']))))
+                # Y.append(str2id(row['title'].split(" "), start_end=True))
+                Y.append(str2id(list(stanford.tokenize(row['content'])), start_end=True))
+                if len(X) == batch_size:
+                    # print len(X)
+                    X = np.array(padding(X))
+                    Y = np.array(padding(Y))
+                    yield [X, Y], None
+                    X, Y = [], []
 
 
 # 搭建seq2seq模型
-
 x_in = Input(shape=(None,))
 y_in = Input(shape=(None,))
 x = x_in
@@ -99,6 +142,7 @@ class ScaleShift(Layer):
     """
     def __init__(self, **kwargs):
         super(ScaleShift, self).__init__(**kwargs)
+
     def build(self, input_shape):
         kernel_shape = (1,)*(len(input_shape)-1) + (input_shape[-1],)
         self.log_scale = self.add_weight(name='log_scale',
@@ -107,25 +151,30 @@ class ScaleShift(Layer):
         self.shift = self.add_weight(name='shift',
                                      shape=kernel_shape,
                                      initializer='zeros')
+
     def call(self, inputs):
         x_outs = K.exp(self.log_scale) * inputs + self.shift
         return x_outs
 
 
 x_one_hot = Lambda(to_one_hot)([x, x_mask])
-x_prior = ScaleShift()(x_one_hot) # 学习输出的先验分布（标题的字词很可能在文章出现过）
+x_prior = ScaleShift()(x_one_hot)  # 学习输出的先验分布（标题的字词很可能在文章出现过）
 
 embedding = Embedding(len(chars)+4, char_size)
 x = embedding(x)
 y = embedding(y)
 
 # encoder，双层双向LSTM
-x = Bidirectional(CuDNNLSTM(char_size/2, return_sequences=True))(x)
-x = Bidirectional(CuDNNLSTM(char_size/2, return_sequences=True))(x)
+# x = Bidirectional(CuDNNLSTM(char_size/2, return_sequences=True))(x)
+# x = Bidirectional(CuDNNLSTM(char_size/2, return_sequences=True))(x)
+x = Bidirectional(LSTM(char_size/2, return_sequences=True))(x)
+x = Bidirectional(LSTM(char_size/2, return_sequences=True))(x)
 
 # decoder，双层单向LSTM
-y = CuDNNLSTM(char_size, return_sequences=True)(y)
-y = CuDNNLSTM(char_size, return_sequences=True)(y)
+# y = CuDNNLSTM(char_size, return_sequences=True)(y)
+# y = CuDNNLSTM(char_size, return_sequences=True)(y)
+y = LSTM(char_size, return_sequences=True)(y)
+y = LSTM(char_size, return_sequences=True)(y)
 
 
 class Interact(Layer):
@@ -133,17 +182,19 @@ class Interact(Layer):
     """
     def __init__(self, **kwargs):
         super(Interact, self).__init__(**kwargs)
+
     def build(self, input_shape):
         in_dim = input_shape[0][-1]
         out_dim = input_shape[1][-1]
         self.kernel = self.add_weight(name='kernel',
                                       shape=(in_dim, out_dim),
                                       initializer='glorot_normal')
+
     def call(self, inputs):
         q, v, v_mask = inputs
         k = v
-        mv = K.max(v - (1. - v_mask) * 1e10, axis=1, keepdims=True) # maxpooling1d
-        mv = mv + K.zeros_like(q[:,:,:1]) # 将mv重复至“q的timesteps”份
+        mv = K.max(v - (1. - v_mask) * 1e10, axis=1, keepdims=True)  # maxpooling1d
+        mv = mv + K.zeros_like(q[:, :, :1])  # 将mv重复至“q的timesteps”份
         # 下面几步只是实现了一个乘性attention
         qw = K.dot(q, self.kernel)
         a = K.batch_dot(qw, k, [2, 2]) / 10.
@@ -152,6 +203,7 @@ class Interact(Layer):
         o = K.batch_dot(a, v, [2, 1])
         # 将各步结果拼接
         return K.concatenate([o, q, mv], 2)
+
     def compute_output_shape(self, input_shape):
         return (None, input_shape[0][1],
                 input_shape[0][2]+input_shape[1][2]*2)
@@ -160,7 +212,7 @@ class Interact(Layer):
 xy = Interact()([y, x, x_mask])
 xy = Dense(512, activation='relu')(xy)
 xy = Dense(len(chars)+4)(xy)
-xy = Lambda(lambda x: (x[0]+x[1])/2)([xy, x_prior]) # 与先验结果平均
+xy = Lambda(lambda x: (x[0]+x[1])/2)([xy, x_prior])  # 与先验结果平均
 xy = Activation('softmax')(xy)
 
 # 交叉熵作为loss，但mask掉padding部分
@@ -176,31 +228,31 @@ def gen_title(s, topk=3):
     """beam search解码
     每次只保留topk个最优候选结果；如果topk=1，那么就是贪心搜索
     """
-    xid = np.array([str2id(s)] * topk) # 输入转id
-    yid = np.array([[2]] * topk) # 解码均以<start>开通，这里<start>的id为2
-    scores = [0] * topk # 候选答案分数
-    for i in range(50): # 强制要求标题不超过50字
-        proba = model.predict([xid, yid])[:, i, 3:] # 直接忽略<padding>、<unk>、<start>
-        log_proba = np.log(proba + 1e-6) # 取对数，方便计算
-        arg_topk = log_proba.argsort(axis=1)[:,-topk:] # 每一项选出topk
-        _yid = [] # 暂存的候选目标序列
-        _scores = [] # 暂存的候选目标序列得分
+    xid = np.array([str2id(s)] * topk)  # 输入转id
+    yid = np.array([[2]] * topk)  # 解码均以<start>开通，这里<start>的id为2
+    scores = [0] * topk  # 候选答案分数
+    for i in range(50):  # 强制要求标题不超过50字
+        proba = model.predict([xid, yid])[:, i, 3:]  # 直接忽略<padding>、<unk>、<start>
+        log_proba = np.log(proba + 1e-6)  # 取对数，方便计算
+        arg_topk = log_proba.argsort(axis=1)[:, -topk:]  # 每一项选出topk
+        _yid = []  # 暂存的候选目标序列
+        _scores = []  # 暂存的候选目标序列得分
         if i == 0:
             for j in range(topk):
                 _yid.append(list(yid[j]) + [arg_topk[0][j]+3])
                 _scores.append(scores[j] + log_proba[0][arg_topk[0][j]])
         else:
             for j in range(len(xid)):
-                for k in range(topk): # 遍历topk*topk的组合
+                for k in range(topk):  # 遍历topk*topk的组合
                     _yid.append(list(yid[j]) + [arg_topk[j][k]+3])
                     _scores.append(scores[j] + log_proba[j][arg_topk[j][k]])
-            _arg_topk = np.argsort(_scores)[-topk:] # 从中选出新的topk
+            _arg_topk = np.argsort(_scores)[-topk:]  # 从中选出新的topk
             _yid = [_yid[k] for k in _arg_topk]
             _scores = [_scores[k] for k in _arg_topk]
         yid = []
         scores = []
         for k in range(len(xid)):
-            if _yid[k][-1] == 3: # 找到<end>就返回
+            if _yid[k][-1] == 3:  # 找到<end>就返回q
                 return id2str(_yid[k])
             else:
                 yid.append(_yid[k])
@@ -210,12 +262,15 @@ def gen_title(s, topk=3):
     return id2str(yid[np.argmax(scores)])
 
 
-s1 = u'夏天来临，皮肤在强烈紫外线的照射下，晒伤不可避免，因此，晒后及时修复显得尤为重要，否则可能会造成长期伤害。专家表示，选择晒后护肤品要慎重，芦荟凝胶是最安全，有效的一种选择，晒伤严重者，还请及时就医。'
-s2 = u'8月28日，网络爆料称，华住集团旗下连锁酒店用户数据疑似发生泄露。从卖家发布的内容看，数据包含华住旗下汉庭、禧玥、桔子、宜必思等10余个品牌酒店的住客信息。泄露的信息包括华住官网注册资料、酒店入住登记的身份信息及酒店开房记录，住客姓名、手机号、邮箱、身份证号、登录账号密码等。卖家对这个约5亿条数据打包出售。第三方安全平台威胁猎人对信息出售者提供的三万条数据进行验证，认为数据真实性非常高。当天下午，华住集团发声明称，已在内部迅速开展核查，并第一时间报警。当晚，上海警方消息称，接到华住集团报案，警方已经介入调查。'
+# s1 = u'夏天来临，皮肤在强烈紫外线的照射下，晒伤不可避免，因此，晒后及时修复显得尤为重要，否则可能会造成长期伤害。专家表示，选择晒后护肤品要慎重，芦荟凝胶是最安全，有效的一种选择，晒伤严重者，还请及时就医。'
+# s2 = u'8月28日，网络爆料称，华住集团旗下连锁酒店用户数据疑似发生泄露。从卖家发布的内容看，数据包含华住旗下汉庭、禧玥、桔子、宜必思等10余个品牌酒店的住客信息。泄露的信息包括华住官网注册资料、酒店入住登记的身份信息及酒店开房记录，住客姓名、手机号、邮箱、身份证号、登录账号密码等。卖家对这个约5亿条数据打包出售。第三方安全平台威胁猎人对信息出售者提供的三万条数据进行验证，认为数据真实性非常高。当天下午，华住集团发声明称，已在内部迅速开展核查，并第一时间报警。当晚，上海警方消息称，接到华住集团报案，警方已经介入调查。'
+s1 = u'When someone commits a murder they typically go to extreme lengths to cover up their brutal crime. The harsh prison sentences that go along with killing someone are enough to deter most people from ever wanting to be caught, not to mention the intense social scrutiny they would face.\nOccasionally, however, there are folks who come forward and admit guilt in their crime. This can be for any number of reasons, like to gain notoriety or to clear their conscience, though, in other instances, people do it to come clean to the people they care about.\nWhen Rachel Hutson was just 19 years old, she murdered her own mother in cold blood. As heinous and unimaginable as her crime was, it was what she did after that shocked people the most\u2026\n\nRachel was just a teenager when she committed an unthinkable act against her own other\u2026\nWhile that in and of itself was a heinous crime, it\u2019s what Rachel did in the aftermath of her own mother\u2019s murder that shook people to their core. You\u2019re not going to believe what strange thing she decided to do next\u2026\nIt\u2019s hard to understand what drove Rachel to commit this terrible act, but sending the photo afterward seems to make even less sense.\nShare this heartbreaking story with your friends below.'
+s2 = u"James Milner may not be one of the most exciting players in world football but he is one of the most effective, as underlined by the fact that the Liverpool ace is on the verge of making Champions League history.\nAhead of his side's semi-final first-leg meeting with Roma at Anfield, the England international needs just one more assist to break the tournament's all-time record for a single season.\n\nIndeed, Milner has already created eight goals during the Reds' remarkable run to the last four \u2013 three more than his nearest rivals, team-mate Roberto Firmino and Luis Suarez of the already-eliminated Barcelona.\nShould the 32-year-old midfielder turn provider again against Roma, he will claim outright possession of the record from Neymar and Wayne Rooney, both of whom racked up seven assists, in 2016-17 and 2013-14, respectively.\nMilner's achievement is made all the more remarkable for the fact that he has played only 611 minutes \u2013 fewer than both Neymar (797) and Rooney (765).\nHe actually started Liverpool's Champions League campaign on the bench, failing to see any game time in the draws with Sevilla and Spartak Moscow.\nHowever, as soon as he was added to Jurgen Klopp's starting line-up, the Reds began winning, with Milner racking up an assist in both the away and home wins over Maribor. Milner set up three goals in the 7-0 demolition of Spartak, which saw Liverpool progress to the knockout stage as winners of Group E.\nMilner teed Firmino up for Liverpool's fourth in their 5-0 win at Porto in the last 16 before doing likewise for Alex Oxlade-Chamberlain in the rousing 3-0 victory over Manchester at Anfield in the quarter-finals.\n\nAs a result, the Reds' unlikely hero is now poised to do something no player has ever done before in Champions League history!\n"
 
 class Evaluate(Callback):
     def __init__(self):
         self.lowest = 1e10
+
     def on_epoch_end(self, epoch, logs=None):
         # 训练过程中观察一两个例子，显示标题质量提高的过程
         print gen_title(s1)
@@ -229,7 +284,7 @@ class Evaluate(Callback):
 evaluator = Evaluate()
 
 model.fit_generator(data_generator(),
-                    steps_per_epoch=1000,
+                    steps_per_epoch=10,
                     epochs=epochs,
                     callbacks=[evaluator])
 
