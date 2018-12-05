@@ -18,13 +18,14 @@ token = list(stanford.tokenize(str))
 print token
 
 
-min_count = 32
+# min_count = 32
+min_count = 10
 # min_count = 2
-maxlen = 400
-# maxlen = 4000
+# maxlen = 400
+maxlen = 1000
 # maxlen = 40
 batch_size = 64
-# batch_size = 4
+# batch_size = 16
 # epochs = 100
 epochs = 10
 char_size = 128
@@ -47,10 +48,15 @@ else:
         train_set0_json_str = "[" + ','.join(train_set0) + "]"
         import pandas as pd
         train_set0_df = pd.read_json(train_set0_json_str)
+        from clean_text import clean_text
+        train_set0_df['content'] = clean_text(train_set0_df['content'])
+        train_set0_df['title'] = clean_text(train_set0_df['title'])
+
         # stanford = CoreNLPParser()
         # for row in train_set0_df:
         for index, row in train_set0_df.iterrows():
             # print row['content'].encode('utf-8')
+            # print row['title'].encode('utf-8')
             # for w in row['content'].split(" "):
             for w in list(stanford.tokenize(row['content'])):
                 chars[w] = chars.get(w, 0) + 1
@@ -79,7 +85,7 @@ def str2id(s, start_end=False):
 
 def id2str(ids):
     # id转文字，找不到的用空字符代替
-    return ''.join([id2char.get(i, '') for i in ids])
+    return ' '.join([id2char.get(i, '') for i in ids])
 
 
 def padding(x):
@@ -102,6 +108,10 @@ def data_generator():
             train_set0_json_str = "[" + ','.join(train_set0) + "]"
             import pandas as pd
             train_set0_df = pd.read_json(train_set0_json_str)
+            from clean_text import clean_text
+            train_set0_df['content'] = clean_text(train_set0_df['content'])
+            train_set0_df['title'] = clean_text(train_set0_df['title'])
+
             # stanford = CoreNLPParser()
             # for row in train_set0_df:
             for index, row in train_set0_df.iterrows():
@@ -110,7 +120,8 @@ def data_generator():
                 # stanford = CoreNLPParser()
                 X.append(str2id(list(stanford.tokenize(row['content']))))
                 # Y.append(str2id(row['title'].split(" "), start_end=True))
-                Y.append(str2id(list(stanford.tokenize(row['content'])), start_end=True))
+                # print row['title']
+                Y.append(str2id(list(stanford.tokenize(row['title'])), start_end=True))
                 if len(X) == batch_size:
                     # print len(X)
                     X = np.array(padding(X))
@@ -266,6 +277,10 @@ def gen_title(s, topk=3):
 # s2 = u'8月28日，网络爆料称，华住集团旗下连锁酒店用户数据疑似发生泄露。从卖家发布的内容看，数据包含华住旗下汉庭、禧玥、桔子、宜必思等10余个品牌酒店的住客信息。泄露的信息包括华住官网注册资料、酒店入住登记的身份信息及酒店开房记录，住客姓名、手机号、邮箱、身份证号、登录账号密码等。卖家对这个约5亿条数据打包出售。第三方安全平台威胁猎人对信息出售者提供的三万条数据进行验证，认为数据真实性非常高。当天下午，华住集团发声明称，已在内部迅速开展核查，并第一时间报警。当晚，上海警方消息称，接到华住集团报案，警方已经介入调查。'
 s1 = u'When someone commits a murder they typically go to extreme lengths to cover up their brutal crime. The harsh prison sentences that go along with killing someone are enough to deter most people from ever wanting to be caught, not to mention the intense social scrutiny they would face.\nOccasionally, however, there are folks who come forward and admit guilt in their crime. This can be for any number of reasons, like to gain notoriety or to clear their conscience, though, in other instances, people do it to come clean to the people they care about.\nWhen Rachel Hutson was just 19 years old, she murdered her own mother in cold blood. As heinous and unimaginable as her crime was, it was what she did after that shocked people the most\u2026\n\nRachel was just a teenager when she committed an unthinkable act against her own other\u2026\nWhile that in and of itself was a heinous crime, it\u2019s what Rachel did in the aftermath of her own mother\u2019s murder that shook people to their core. You\u2019re not going to believe what strange thing she decided to do next\u2026\nIt\u2019s hard to understand what drove Rachel to commit this terrible act, but sending the photo afterward seems to make even less sense.\nShare this heartbreaking story with your friends below.'
 s2 = u"James Milner may not be one of the most exciting players in world football but he is one of the most effective, as underlined by the fact that the Liverpool ace is on the verge of making Champions League history.\nAhead of his side's semi-final first-leg meeting with Roma at Anfield, the England international needs just one more assist to break the tournament's all-time record for a single season.\n\nIndeed, Milner has already created eight goals during the Reds' remarkable run to the last four \u2013 three more than his nearest rivals, team-mate Roberto Firmino and Luis Suarez of the already-eliminated Barcelona.\nShould the 32-year-old midfielder turn provider again against Roma, he will claim outright possession of the record from Neymar and Wayne Rooney, both of whom racked up seven assists, in 2016-17 and 2013-14, respectively.\nMilner's achievement is made all the more remarkable for the fact that he has played only 611 minutes \u2013 fewer than both Neymar (797) and Rooney (765).\nHe actually started Liverpool's Champions League campaign on the bench, failing to see any game time in the draws with Sevilla and Spartak Moscow.\nHowever, as soon as he was added to Jurgen Klopp's starting line-up, the Reds began winning, with Milner racking up an assist in both the away and home wins over Maribor. Milner set up three goals in the 7-0 demolition of Spartak, which saw Liverpool progress to the knockout stage as winners of Group E.\nMilner teed Firmino up for Liverpool's fourth in their 5-0 win at Porto in the last 16 before doing likewise for Alex Oxlade-Chamberlain in the rousing 3-0 victory over Manchester at Anfield in the quarter-finals.\n\nAs a result, the Reds' unlikely hero is now poised to do something no player has ever done before in Champions League history!\n"
+from clean_text import clean_text
+s1 = clean_text([s1])[0].split(' ')
+s2 = clean_text([s2])[0].split(' ')
+
 
 class Evaluate(Callback):
     def __init__(self):
